@@ -105,7 +105,7 @@ scene.add(hemiLight)
     // ---- CREAR PLANETA ----
     // Crear el planeta y agregarlo a la escena
     const planet = createPlanet()
-    planet.position.set(4, 5, 0)
+    planet.position.set(4, 0.5, 0)
     scene.add(planet)
 
     // ---- CREAR CRISTAL ----

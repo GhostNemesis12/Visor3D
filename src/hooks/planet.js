@@ -5,6 +5,17 @@ import * as THREE from "three"
 // ─────────────────────────────────────────────────────────────────────────────
 const loader = new THREE.TextureLoader()
 
+const ASTEROID_TEXTURES = [
+    loader.load('/textures/asteroide_ceres.jpg'),
+    loader.load('/textures/asteroide_eris.jpg'),
+    loader.load('/textures/asteroide_haumea.jpg'),
+    loader.load('/textures/asteroide_makemake.jpg'),
+]
+
+const NUBES_TEX = loader.load('/textures/nubes.jpg')
+NUBES_TEX.wrapS = THREE.RepeatWrapping
+NUBES_TEX.wrapT = THREE.ClampToEdgeWrapping
+
 const CINTURONES = [
     { radio: 2.0, inclinacion: 0.30, velocidad: 0.08, cantidad: 55, dispersion: 0.30 },
     { radio: 2.9, inclinacion: 0.55, velocidad: -0.05, cantidad: 40, dispersion: 0.45 },
@@ -36,10 +47,21 @@ function makeCinturon({ radio, inclinacion, cantidad, dispersion }, semillaBase)
         const elevacion = (r2 - 0.5) * dispersion * 0.4
         const tamaño = 0.03 + r0 * 0.07
 
+        // Elegir textura aleatoria de asteroides
+        const texIdx = Math.floor(r2 * ASTEROID_TEXTURES.length)
+        const asteroidTexture = ASTEROID_TEXTURES[texIdx].clone()
+        asteroidTexture.wrapS = THREE.RepeatWrapping
+        asteroidTexture.wrapT = THREE.RepeatWrapping
+        // Offset UV aleatorio para mostrar parte diferente de la textura
+        asteroidTexture.offset.set(rand(semillaBase + i * 7), rand(semillaBase + i * 7 + 1))
+        asteroidTexture.repeat.set(0.5 + r0 * 0.5, 0.5 + r1 * 0.5)
+        asteroidTexture.needsUpdate = true
+
         const mesh = new THREE.Mesh(
-            new THREE.IcosahedronGeometry(tamaño, 0),
+            new THREE.IcosahedronGeometry(tamaño, 1),
             new THREE.MeshStandardMaterial({
                 color: colores[i % colores.length],
+                map: asteroidTexture,
                 roughness: 0.9,
                 metalness: 0.05,
                 flatShading: true,
@@ -53,6 +75,12 @@ function makeCinturon({ radio, inclinacion, cantidad, dispersion }, semillaBase)
             Math.sin(angulo) * radioLocal,
         )
         mesh.rotation.set(r0 * Math.PI * 2, r1 * Math.PI * 2, r2 * Math.PI * 2)
+        // Guardar datos para animación de rotación propia
+        mesh.userData.rotSpeed = {
+            x: (r0 - 0.5) * 0.5,
+            y: (r1 - 0.5) * 0.5,
+            z: (r2 - 0.5) * 0.5,
+        }
 
         group.add(mesh)
     }
@@ -149,41 +177,41 @@ function createAlienCloudTexture({
             const pSheared  = uvToSphere(shearU, v)
             const s         = seed * 3.7
 
-            const cloud  = fbm(pSheared.x * 3 + s, pSheared.y * 3 + s, pSheared.z * 3 + s, 6)
-            const detail = fbm(p.x * 8 + s + 1.1,  p.y * 8 + s,        p.z * 8 + s,        4, 2.3, 0.45)
-            const ridged = 1 - Math.abs(fbm(p.x * 4 + s, p.y * 4 + s, p.z * 4 + s, 5))
-            const erosion = fbm(p.x * 12 + s, p.y * 12 + s, p.z * 12 + s, 3)
+            const cloud  = fbm(pSheared.x * 5 + s, pSheared.y * 5 + s, pSheared.z * 5 + s, 6)
+            const detail = fbm(p.x * 15 + s + 1.1,  p.y * 15 + s,        p.z * 15 + s,        4, 2.3, 0.45)
+            const ridged = 1 - Math.abs(fbm(p.x * 8 + s, p.y * 8 + s, p.z * 8 + s, 5))
+            const erosion = fbm(p.x * 20 + s, p.y * 20 + s, p.z * 20 + s, 3)
             const bandNoise = fbm(p.x * 2 + s, p.y * 2, p.z * 2, 3)
             const band =
                 Math.pow(Math.abs(Math.sin(lat * Math.PI * 4 + windBias * 5)), 1.2) *
                 bandStrength *
                 (0.6 + bandNoise * 0.4)
 
-            let density =
-                cloud * 0.5 +
-                ridged * 0.3 +
-                detail * 0.2 -
-                erosion * 0.15
+            let density = cloud * 0.5 + ridged * 0.3 + detail * 0.2 - erosion * 0.15;
 
+
+            // Añadir tormentas (si las hay)
             for (const storm of storms) {
-                const du   = Math.min(Math.abs(u - storm.lon), 1 - Math.abs(u - storm.lon))
-                const dv   = v - storm.lat
-                const dist = Math.sqrt(du * du + dv * dv)
+                const du = Math.min(Math.abs(u - storm.lon), 1 - Math.abs(u - storm.lon));
+                const dv = v - storm.lat;
+                const dist = Math.sqrt(du * du + dv * dv);
                 if (dist < storm.radius * 3) {
-                    const angle  = Math.atan2(dv, du) + dist * 8
-                    const noiseStorm = fbm(du * 10, dv * 10, s, 3)
+                    const angle = Math.atan2(dv, du) + dist * 8;
+                    const noiseStorm = fbm(du * 10, dv * 10, s, 3);
                     const spiral =
                         Math.cos(angle + noiseStorm * 2) *
-                        (1 - dist / (storm.radius * 3))
-                    density += spiral * storm.strength * 0.25 * Math.exp(-dist / storm.radius)
+                        (1 - dist / (storm.radius * 3));
+                    density += spiral * storm.strength * 0.25 * Math.exp(-dist / storm.radius);
                 }
             }
+            // minDensity depende de coverage: más coverage = umbral más bajo = más nubes
+            const minDensity = 0.35 - coverage * 0.30
+            const maxDensity = 0.90
+            let t = (density - minDensity) / (maxDensity - minDensity)
+            t = Math.max(0, Math.min(1, t))
 
-            density = (density - (1 - coverage)) / coverage
-            density = smoothstep(0.1, 0.9, density)
-
-            const edge = smoothstep(0.2, 0.8, density)
-            const alpha = Math.min(edge * 4, 1.0)
+            const contrasted = Math.pow(t, 2.5) * 0.95
+            const alpha = contrasted * 0.98
             const colorVar = density * 40 + fbm(p.x * 6, p.y * 6, p.z * 6, 2) * 20
             const i = (py * size + px) * 4
             data[i]     = tint[0]
@@ -206,7 +234,7 @@ export function createPlanet() {
     const group = new THREE.Group()
 
     // ── Planeta ───────────────────────────────────────────────────────────────
-    const textura = loader.load("/textures/planet.jpg")
+    const textura = loader.load("/textures/Terrestrial2.png")
 
     const planeta = new THREE.Mesh(
         new THREE.SphereGeometry(1.2, 128, 128),
@@ -226,7 +254,7 @@ export function createPlanet() {
     const atmosfera = new THREE.Mesh(
         new THREE.SphereGeometry(1.28, 64, 64),
         new THREE.MeshBasicMaterial({
-            color: 0xffcc88,
+            color: 0xadbcff,
             transparent: true,
             opacity: 0.10,
             side: THREE.BackSide,
@@ -237,54 +265,58 @@ export function createPlanet() {
     atmosfera.material.depthWrite = false
     group.add(atmosfera)
 
-    // ── Nubes en tres capas ───────────────────────────────────────────────────
+    // ── Nubes en tres capas (textura real de la Tierra) ──────────────────────
 
-    // Capa 1 — nubes bajas densas (opaca, color cálido)
+    // Clonamos la textura para que cada capa tenga su propio offset UV
+    const texNubes1 = NUBES_TEX.clone()
+    texNubes1.wrapS = THREE.RepeatWrapping
+    texNubes1.offset.x = 0.0
+
+    const texNubes2 = NUBES_TEX.clone()
+    texNubes2.wrapS = THREE.RepeatWrapping
+    texNubes2.offset.x = 0.33
+
+    const texNubes3 = NUBES_TEX.clone()
+    texNubes3.wrapS = THREE.RepeatWrapping
+    texNubes3.offset.x = 0.66
+
+    // Capa 1 — nubes bajas densas (más opaca, radio más pegado al planeta)
     const nubes = new THREE.Mesh(
         new THREE.SphereGeometry(1.225, 128, 128),
-        new THREE.MeshStandardMaterial({
-            map: createAlienCloudTexture({
-                seed: 0, bandStrength: 0.7, coverage: 0.50, stormCount: 2,
-                tint: [255, 230, 190], size: 512,
-            }),
-            transparent: true, opacity: 0.65,
-            depthWrite: false, roughness: 1, metalness: 0,
+        new THREE.MeshBasicMaterial({
+            map: texNubes1,
+            transparent: true, opacity: 0.95,
+            depthWrite: false,
+            side: THREE.DoubleSide,
         })
     )
     nubes.renderOrder = 2
-    nubes.castShadow = false
     group.add(nubes)
 
-    // Capa 2 — nubes medias, vientos cruzados (semitransparente, tono frío)
+    // Capa 2 — nubes medias, desplazadas (semitransparente)
     const nubesMid = new THREE.Mesh(
         new THREE.SphereGeometry(1.245, 64, 64),
-        new THREE.MeshStandardMaterial({
-            map: createAlienCloudTexture({
-                seed: 17.3, bandStrength: 0.5, coverage: 0.35, stormCount: 1,
-                tint: [210, 220, 255], size: 256,
-            }),
-            transparent: true, opacity: 0.55,
-            depthWrite: false, roughness: 1, metalness: 0,
+        new THREE.MeshBasicMaterial({
+            map: texNubes2,
+            transparent: true, opacity: 0.75,
+            depthWrite: false,
+            side: THREE.DoubleSide,
         })
     )
     nubesMid.renderOrder = 2
-    nubesMid.castShadow = false
     group.add(nubesMid)
 
-    // Capa 3 — cirros altos, muy rápidos (casi transparente, blancos)
+    // Capa 3 — cirros altos, casi transparentes (radio mayor)
     const nubesAltas = new THREE.Mesh(
         new THREE.SphereGeometry(1.265, 64, 64),
-        new THREE.MeshStandardMaterial({
-            map: createAlienCloudTexture({
-                seed: 53.9, bandStrength: 0.9, coverage: 0.25, stormCount: 0,
-                tint: [255, 255, 255], size: 256,
-            }),
-            transparent: true, opacity: 0.35,
-            depthWrite: false, roughness: 1, metalness: 0,
+        new THREE.MeshBasicMaterial({
+            map: texNubes3,
+            transparent: true, opacity: 0.55,
+            depthWrite: false,
+            side: THREE.DoubleSide,
         })
     )
     nubesAltas.renderOrder = 2
-    nubesAltas.castShadow = false
     group.add(nubesAltas)
 
     // ── Cinturones de asteroides ──────────────────────────────────────────────
@@ -302,6 +334,9 @@ export function createPlanet() {
     group.userData.nubesAltas = nubesAltas
     group.userData.cinturones = cinturones
 
+    // Fase inicial para opacidad de nubes (cada capa desfasada)
+    group.userData.cloudPhases = [0, 2.1, 4.2]
+
     return group
 }
 
@@ -317,30 +352,63 @@ export function animatePlanet(group, timestamp) {
     const delta = ud.lastTime === 0 ? 0 : (timestamp - ud.lastTime) * 0.001
     ud.lastTime = timestamp
     ud.elapsed += delta
-    ud.nubes.material.map.offset.x += delta * 0.01
-    ud.nubesMid.material.map.offset.x -= delta * 0.02
-    ud.nubesAltas.material.map.offset.x += delta * 0.05
 
-    // Planeta
-    ud.planeta.rotation.y = ud.elapsed * 0.3
+    // ── Movimiento de texturas de nubes (simula vientos) ──
+    if (ud.nubes && ud.nubes.material.map) {
+        ud.nubes.material.map.offset.x += delta * 0.01
+    }
+    if (ud.nubesMid && ud.nubesMid.material.map) {
+        ud.nubesMid.material.map.offset.x -= delta * 0.02
+    }
+    if (ud.nubesAltas && ud.nubesAltas.material.map) {
+        ud.nubesAltas.material.map.offset.x += delta * 0.05
+    }
 
-    // Capa baja — lenta, sentido directo
+    // ── Rotación del planeta ──
+    if (ud.planeta) ud.planeta.rotation.y = ud.elapsed * 0.3
+
+    // ── Rotación de capas de nubes ──
     if (ud.nubes)      ud.nubes.rotation.y      += delta * 0.04
-
-    // Capa media — velocidad media, sentido inverso
     if (ud.nubesMid)   ud.nubesMid.rotation.y   -= delta * 0.07
-
-    // Cirros altos — rápidos, jet stream
     if (ud.nubesAltas) ud.nubesAltas.rotation.y += delta * 0.18
 
-    // Atmósfera
+    // ── Opacidad variable suave para simular nubes reales ──
+    // Cada capa tiene su propia fase para que no todas cambien a la vez
+    const phases = ud.cloudPhases || [0, 2.1, 4.2]
+    phases[0] += delta * 0.15
+    phases[1] += delta * 0.22
+    phases[2] += delta * 0.35
+    ud.cloudPhases = phases
+
+    if (ud.nubes) {
+        // Opacidad oscila entre 0.75 y 1.0 — nubes bajas son más estables
+        ud.nubes.material.opacity = 0.88 + Math.sin(phases[0]) * 0.12
+    }
+    if (ud.nubesMid) {
+        // Opacidad oscila entre 0.55 y 0.95 — medias cambian más
+        ud.nubesMid.material.opacity = 0.75 + Math.sin(phases[1]) * 0.20
+    }
+    if (ud.nubesAltas) {
+        // Opacidad oscila entre 0.35 y 0.90 — altas son muy variables
+        ud.nubesAltas.material.opacity = 0.62 + Math.sin(phases[2]) * 0.28
+    }
+
+    // ── Atmósfera ──
     if (ud.atmosfera) {
         ud.atmosfera.rotation.y -= delta * 0.01
         ud.atmosfera.material.opacity = 0.15 + Math.sin(ud.elapsed * 0.5) * 0.03
     }
 
-    // Cinturones de asteroides
+    // ── Cinturones de asteroides ──
     for (const { group: cg, velocidad } of ud.cinturones) {
         cg.rotation.y += velocidad * delta
+        // Rotación propia de cada asteroide
+        cg.children.forEach(asteroid => {
+            if (asteroid.userData.rotSpeed) {
+                asteroid.rotation.x += asteroid.userData.rotSpeed.x * delta
+                asteroid.rotation.y += asteroid.userData.rotSpeed.y * delta
+                asteroid.rotation.z += asteroid.userData.rotSpeed.z * delta
+            }
+        })
     }
 }
